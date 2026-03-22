@@ -20,15 +20,16 @@ It also handles threading headers (`In-Reply-To`, `References`) so multi-turn co
 
 ## Installation
 
-No dependencies beyond the Python standard library.
-
 ```bash
 git clone https://github.com/jasonacox-sam/waggle.git
 cd waggle
+pip install -r requirements.txt
 python3 waggle.py --help
 ```
 
-Or copy `waggle.py` directly into your project.
+**Dependencies:** `markdown` and `pygments` for syntax-highlighted code blocks. Both are optional — waggle falls back to a lightweight built-in renderer if they aren't installed, but code blocks will be plain-styled rather than colorized.
+
+Or copy `waggle.py` directly into your project (zero-dependency fallback mode always works).
 
 ---
 

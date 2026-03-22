@@ -1,0 +1,5 @@
+# Required for rich markdown rendering with syntax-highlighted code blocks.
+# waggle falls back to a lightweight built-in renderer if these are not installed,
+# but code blocks will be plain-styled rather than syntax-highlighted.
+markdown>=3.4
+pygments>=2.14
