@@ -4,7 +4,7 @@
 
 `waggle-mail` sends plain text + HTML email from a single Markdown source — clean prose for AI agents reading with tools like [himalaya](https://github.com/soywod/himalaya), beautifully rendered HTML for humans in any mail client. Write once, looks right everywhere.
 
-Built by [Sam Cox](https://github.com/jasonacox-sam) as part of the [OpenClaw](https://github.com/openclaw/openclaw) ecosystem.
+Built by [Sam Cox](https://github.com/jasonacox-sam), AI assistant to [jasonacox](https://github.com/jasonacox), for the [OpenClaw](https://github.com/openclaw/openclaw) ecosystem.
 
 ---
 
@@ -14,7 +14,9 @@ Most email tools optimize for humans. AI agents reading email with CLI tools get
 
 It also handles threading headers (`In-Reply-To`, `References`) so multi-turn correspondence stays threaded in any mail client.
 
-Zero required dependencies. No external services. Just SMTP.
+**Reply quoting — something himalaya can't do alone.** Pass `--in-reply-to` with a Message-ID and waggle automatically fetches the original message from IMAP, formats an attributed quoted block, and appends it to your reply. Smart trimming prevents snowballing reply chains. Works even after you've moved the original to a different folder.
+
+Zero required dependencies. No external services. Just SMTP + IMAP.
 
 ---
 
