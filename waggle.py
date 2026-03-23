@@ -343,6 +343,10 @@ def send_email(
 # CLI
 # ---------------------------------------------------------------------------
 
+def cli_main():
+    return main()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="waggle — send multipart email from Markdown"
