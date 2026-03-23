@@ -1,10 +1,8 @@
-# waggle 📬
+# waggle-mail 📬
 
-**Not just a message. A vector.**
+**Multipart email for AI agents who write letters.**
 
-The waggle dance a honeybee performs encodes direction, distance, and quality — the full information another bee needs to decide if the flight is worth taking. A good letter does the same thing. `waggle` helps AI agents and humans send them.
-
-`waggle` sends **multipart email** (plain text + HTML) rendered from a single Markdown source. Plain text for AI agents reading with tools like [himalaya](https://github.com/soywod/himalaya). HTML for humans reading in mail clients. Write once, looks right everywhere.
+`waggle-mail` sends plain text + HTML email from a single Markdown source — clean prose for AI agents reading with tools like [himalaya](https://github.com/soywod/himalaya), beautifully rendered HTML for humans in any mail client. Write once, looks right everywhere.
 
 Built by [Sam Cox](https://github.com/jasonacox-sam) as part of the [OpenClaw](https://github.com/openclaw/openclaw) ecosystem.
 
@@ -12,30 +10,33 @@ Built by [Sam Cox](https://github.com/jasonacox-sam) as part of the [OpenClaw](h
 
 ## Why
 
-Most email tools optimize for humans. AI agents reading email with CLI tools get mangled HTML — `<p>` tags, `&amp;`, inline styles — where they expected words. `waggle` generates clean, readable plain text alongside the HTML so both audiences get what they need.
+Most email tools optimize for humans. AI agents reading email with CLI tools get mangled HTML — `<p>` tags, `&amp;`, inline styles — where they expected words. `waggle-mail` generates clean, readable plain text (raw Markdown) alongside the HTML so both audiences get what they need.
 
 It also handles threading headers (`In-Reply-To`, `References`) so multi-turn correspondence stays threaded in any mail client.
+
+Zero required dependencies. No external services. Just SMTP.
 
 ---
 
 ## Installation
 
 ```bash
-git clone https://github.com/jasonacox-sam/waggle.git
-cd waggle
-pip install -r requirements.txt
-python3 waggle.py --help
+pip install waggle-mail
 ```
 
-**Dependencies:** `markdown` and `pygments` for syntax-highlighted code blocks. Both are optional — waggle falls back to a lightweight built-in renderer if they aren't installed, but code blocks will be plain-styled rather than colorized.
+For syntax-highlighted code blocks in HTML output:
 
-Or copy `waggle.py` directly into your project (zero-dependency fallback mode always works).
+```bash
+pip install "waggle-mail[rich]"
+```
+
+Or copy `waggle.py` directly into your project — zero-dependency fallback mode always works.
 
 ---
 
 ## Configuration
 
-Set environment variables before running:
+Set environment variables:
 
 ```bash
 export WAGGLE_HOST=smtp.example.com
@@ -43,6 +44,7 @@ export WAGGLE_PORT=465
 export WAGGLE_USER=you@example.com
 export WAGGLE_PASS=yourpassword
 export WAGGLE_FROM=you@example.com   # optional, defaults to WAGGLE_USER
+export WAGGLE_NAME="Your Name"       # optional display name
 export WAGGLE_TLS=true               # false for STARTTLS
 ```
 
@@ -55,19 +57,18 @@ Or pass a `config` dict when calling `send_email()` directly.
 ### CLI
 
 ```bash
-python3 waggle.py \
+waggle \
   --to "friend@example.com" \
   --subject "Hello from waggle" \
-  --body "# Hi there\n\nThis is **markdown** and it works for both humans and AI agents." \
-  --from-name "Sam"
+  --body "# Hi there\n\nThis is **markdown** and it works for both humans and AI agents."
 ```
 
 With threading (for replies):
 
 ```bash
-python3 waggle.py \
+waggle \
   --to "friend@example.com" \
-  --subject "Re: Hello from waggle" \
+  --subject "Re: Hello" \
   --body "Great to hear from you." \
   --in-reply-to "<original-message-id@mail.example.com>" \
   --references "<original-message-id@mail.example.com>"
@@ -107,9 +108,19 @@ send_email(
 
 ---
 
-## Markdown support
+## OpenClaw Skill
 
-`waggle` handles the common subset you'd use in a letter:
+`waggle-mail` ships a `SKILL.md` — install it as a workspace skill so your OpenClaw agent uses waggle for all outbound email automatically:
+
+```bash
+git clone https://github.com/jasonacox-sam/waggle-mail.git ~/.openclaw/workspace/skills/waggle
+```
+
+Then add your SMTP credentials to `~/.openclaw/openclaw.json` under `skills.entries.waggle.env`. See [SKILL.md](SKILL.md) for the full setup.
+
+---
+
+## Markdown support
 
 | Syntax | Result |
 |--------|--------|
@@ -129,7 +140,7 @@ Plain text strips all formatting cleanly — no asterisks, no angle brackets.
 
 In a honeybee colony, scout bees communicate the location and quality of a food source through the waggle dance — a figure-eight movement that encodes bearing (relative to the sun), distance (duration of the waggle run), and quality (enthusiasm of the dance). Other bees use this to decide whether the site is worth visiting.
 
-A task report is a scalar: here is a thing. A waggle is a vector: here is a thing, it is *this far* in *this direction*, and it is *this good*.
+A task report is a scalar: *here is a thing.* A waggle is a vector: *here is a thing, it is this far in this direction, and it is this good.*
 
 Good letters work the same way. This tool helps send them.
 
