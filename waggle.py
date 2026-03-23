@@ -102,23 +102,12 @@ def _validate_email(addr):
 # IMAP: Fetch quoted body for replies
 # ---------------------------------------------------------------------------
 
-def fetch_quoted_body(message_id, config=None):
-    """
-    Search IMAP for a message by Message-ID and return a formatted quoted block.
-
-    Searches all folders (discovered via m.list()) so it works regardless of
-    whether the original has been moved (e.g. to INBOX.Processed).
-
-    Returns a markdown-formatted quoted string or None if unavailable.
-    Stops quoting at the first existing '>' line to prevent snowballing.
-    """
-    cfg = config or {}
-
+def _imap_connect(cfg):
+    """Return an authenticated IMAP connection or None if not configured."""
     imap_host = cfg.get("imap_host") or os.environ.get("WAGGLE_IMAP_HOST") or \
                 os.environ.get("WAGGLE_HOST", "")
     if not imap_host:
-        logger.debug("WAGGLE_IMAP_HOST not set — skipping quote fetch")
-        return None
+        return None, None
 
     raw_port = cfg.get("imap_port") or os.environ.get("WAGGLE_IMAP_PORT", "993")
     try:
@@ -130,6 +119,60 @@ def fetch_quoted_body(message_id, config=None):
     user     = cfg.get("user")     or os.environ.get("WAGGLE_USER", "")
     password = cfg.get("password") or os.environ.get("WAGGLE_PASS", "")
 
+    ctx = ssl.create_default_context()
+    if use_tls:
+        m = imaplib.IMAP4_SSL(imap_host, imap_port, ssl_context=ctx)
+    else:
+        m = imaplib.IMAP4(imap_host, imap_port)
+    m.login(user, password)
+    return m, imap_host
+
+
+def _imap_find_uid(m, mid):
+    """Search all folders for a message by Message-ID. Returns (folder, uid) or (None, None)."""
+    preferred = ["INBOX", "INBOX.Processed", '"Sent Items"', "Sent"]
+    try:
+        _, folder_data = m.list()
+        all_folders = []
+        for item in folder_data or []:
+            if item:
+                parts = item.decode() if isinstance(item, bytes) else item
+                name = parts.rsplit(" ", 1)[-1].strip().strip('"')
+                if name not in [f.strip('"') for f in preferred]:
+                    all_folders.append(name)
+    except Exception:
+        all_folders = []
+
+    for folder in preferred + all_folders:
+        try:
+            status, _ = m.select(folder, readonly=True)
+            if status != "OK":
+                continue
+            status, data = m.search(None, f'HEADER Message-ID "{mid}"')
+            if status == "OK" and data and data[0]:
+                uids = data[0].split()
+                if uids:
+                    return folder, uids[-1]
+        except Exception:
+            continue
+    return None, None
+
+
+def fetch_quoted_body(message_id, config=None):
+    """
+    Fetch the original message from IMAP and return (quoted_plain, quoted_html).
+
+    Outlook-style quoting:
+    - plain: full body under -----Original Message----- attribution header (snowballs naturally)
+    - html:  original email HTML wrapped in a <div> blockquote (snowballs naturally)
+
+    Searches all folders so it works after the original is moved to INBOX.Processed.
+    Returns (None, None) if IMAP is not configured or message not found.
+    """
+    from email.header import decode_header, make_header
+
+    cfg = config or {}
+
     mid = message_id.strip()
     if not mid.startswith("<"):
         mid = f"<{mid}>"
@@ -137,61 +180,30 @@ def fetch_quoted_body(message_id, config=None):
         mid = f"{mid}>"
 
     try:
-        ctx = ssl.create_default_context()
-        if use_tls:
-            m = imaplib.IMAP4_SSL(imap_host, imap_port, ssl_context=ctx)
-        else:
-            m = imaplib.IMAP4(imap_host, imap_port)
+        m, _ = _imap_connect(cfg)
+        if m is None:
+            return None, None
 
-        m.login(user, password)
-
-        # Discover all folders — preferred order first, then everything else
-        preferred = ["INBOX", "INBOX.Processed", '"Sent Items"', "Sent"]
-        try:
-            _, folder_data = m.list()
-            all_folders = []
-            for item in folder_data or []:
-                if item:
-                    parts = item.decode() if isinstance(item, bytes) else item
-                    name = parts.rsplit(" ", 1)[-1].strip().strip('"')
-                    if name not in [f.strip('"') for f in preferred]:
-                        all_folders.append(name)
-        except Exception:
-            all_folders = []
-
-        found_uid = None
-        from_hdr = date_hdr = subj_hdr = ""
-
-        for folder in preferred + all_folders:
-            try:
-                status, _ = m.select(folder, readonly=True)
-                if status != "OK":
-                    continue
-                status, data = m.search(None, f'HEADER Message-ID "{mid}"')
-                if status == "OK" and data and data[0]:
-                    uids = data[0].split()
-                    if uids:
-                        found_uid = uids[-1]
-                        break
-            except Exception:
-                continue
-
-        if not found_uid:
+        folder, uid = _imap_find_uid(m, mid)
+        if not uid:
             m.logout()
-            return None
+            return None, None
 
-        typ, data = m.fetch(found_uid, "(BODY.PEEK[])")
+        # Re-select the folder (find may have left us somewhere else)
+        m.select(folder, readonly=True)
+        typ, data = m.fetch(uid, "(BODY.PEEK[])")
         m.logout()
 
         if typ != "OK" or not data or data[0] is None:
-            return None
+            return None, None
 
         msg = email_lib.message_from_bytes(data[0][1])
-        from_hdr = msg.get("From", "")
-        date_hdr = msg.get("Date", "")
-        subj_hdr = msg.get("Subject", "")
 
-        plain_body = None
+        from_hdr = str(make_header(decode_header(msg.get("From", "")  or "")))
+        date_hdr = str(make_header(decode_header(msg.get("Date", "")  or "")))
+        subj_hdr = str(make_header(decode_header(msg.get("Subject", "") or "")))
+
+        plain_body = html_body = None
         if msg.is_multipart():
             for part in msg.walk():
                 ct = part.get_content_type()
@@ -199,47 +211,59 @@ def fetch_quoted_body(message_id, config=None):
                 if "attachment" in cd:
                     continue
                 if ct == "text/plain" and plain_body is None:
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        plain_body = payload.decode(
-                            part.get_content_charset() or "utf-8", errors="replace"
-                        )
+                    p = part.get_payload(decode=True)
+                    if p:
+                        plain_body = p.decode(part.get_content_charset() or "utf-8", errors="replace")
+                elif ct == "text/html" and html_body is None:
+                    p = part.get_payload(decode=True)
+                    if p:
+                        html_body = p.decode(part.get_content_charset() or "utf-8", errors="replace")
         else:
-            payload = msg.get_payload(decode=True)
-            if payload:
-                plain_body = payload.decode(
-                    msg.get_content_charset() or "utf-8", errors="replace"
-                )
+            p = msg.get_payload(decode=True)
+            if p:
+                plain_body = p.decode(msg.get_content_charset() or "utf-8", errors="replace")
 
-        if not plain_body:
-            return (
-                f"\n\n---\n\n**From:** {from_hdr}  \n**Date:** {date_hdr}\n\n"
-                "*(original message body unavailable)*"
-            )
-
-        lines = plain_body.strip().splitlines()
-        trimmed = []
-        for line in lines:
-            if line.startswith(">") or "-----Original Message-----" in line:
-                break
-            trimmed.append(line)
-
-        while trimmed and not trimmed[-1].strip():
-            trimmed.pop()
-
-        quoted_lines = "\n".join(f"> {line}" if line.strip() else ">" for line in trimmed)
-
-        return (
-            f"\n\n---\n\n"
-            f"**From:** {from_hdr}  \n"
-            f"**Date:** {date_hdr}  \n"
-            f"**Subject:** {subj_hdr}\n\n"
-            f"{quoted_lines}"
+        # --- Plain text quoted block (Outlook style, full body, no trimming) ---
+        attr_plain = (
+            f"-----Original Message-----\n"
+            f"From: {from_hdr}\n"
+            f"Sent: {date_hdr}\n"
+            f"Subject: {subj_hdr}"
         )
+        if plain_body:
+            quoted_plain = f"\n\n{attr_plain}\n\n{plain_body.strip()}"
+        else:
+            quoted_plain = f"\n\n{attr_plain}"
+
+        # --- HTML quoted block (Outlook-style left-border blockquote) ---
+        attr_html = (
+            f'<p style="margin:0 0 8px 0;font-size:12px;color:#777;">'
+            f'<b>From:</b> {from_hdr}<br>'
+            f'<b>Sent:</b> {date_hdr}<br>'
+            f'<b>Subject:</b> {subj_hdr}'
+            f'</p>'
+        )
+        if html_body:
+            inner = html_body
+        elif plain_body:
+            safe = plain_body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            inner = f'<pre style="font-family:inherit;white-space:pre-wrap;margin:0;">{safe}</pre>'
+        else:
+            inner = "<p><em>(original message unavailable)</em></p>"
+
+        quoted_html = (
+            f'<div style="border-left:2px solid #ccc;padding-left:12px;'
+            f'margin-top:16px;color:#555;">'
+            f'{attr_html}'
+            f'{inner}'
+            f'</div>'
+        )
+
+        return quoted_plain, quoted_html
 
     except Exception as e:
         logger.warning(f"IMAP quote fetch failed: {e}")
-        return None
+        return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -268,10 +292,65 @@ def _validate_url(url):
 
 # --- Simple (default) renderer — inline styles, no <head> dependency ---
 
+_PRE_STYLE = (
+    "display:block;background:#f8f8f8;color:#333;"
+    "padding:8px 12px;border-radius:3px;border:1px solid #e0e0e0;"
+    "font-family:'Courier New',Courier,monospace;font-size:12px;"
+    "white-space:pre;overflow-x:auto;margin:8px 0;"
+)
+
+
+def _highlight_code(lang, code_raw):
+    """Render a code block with pygments inline styles, or plain fallback."""
+    try:
+        from pygments import highlight
+        from pygments.lexers import get_lexer_by_name, TextLexer
+        from pygments.formatters import HtmlFormatter
+        try:
+            lexer = get_lexer_by_name(lang) if lang else TextLexer()
+        except Exception:
+            lexer = TextLexer()
+        formatter = HtmlFormatter(
+            style="friendly",
+            noclasses=True,   # inline styles — no <head> needed, Gmail-safe
+            nowrap=True,      # we supply the <pre> wrapper
+        )
+        highlighted = highlight(code_raw, lexer, formatter)
+        return f'<pre style="{_PRE_STYLE}">{highlighted}</pre>'
+    except ImportError:
+        code_esc = code_raw.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return f'<pre style="{_PRE_STYLE}"><code>{code_esc}</code></pre>'
+
+
 def _md_to_html_simple(text):
-    """Render markdown to HTML with inline styles. No <head> CSS required."""
+    """
+    Render markdown to HTML with inline styles. No <head> CSS required.
+
+    Code blocks are extracted first (before any other processing) to prevent
+    inline-emphasis and paragraph-splitter from mangling code content.
+    """
+    # ------------------------------------------------------------------ #
+    # Step 1: Extract fenced code blocks FIRST — replace with placeholders #
+    # Placeholders use null bytes so _escape_html won't touch them, and    #
+    # the paragraph handler can identify and restore them intact.           #
+    # ------------------------------------------------------------------ #
+    _blocks = []
+
+    def _extract_fence(m):
+        lang = m.group(1) or ""
+        code_raw = m.group(2)
+        rendered = _highlight_code(lang, code_raw)
+        idx = len(_blocks)
+        _blocks.append(rendered)
+        # Surround with newlines so paragraph splitter treats it as a block
+        return f"\n\n\x00WCODE{idx}\x00\n\n"
+
+    text = re.sub(r"```(\w*)\n(.*?)```", _extract_fence, text, flags=re.DOTALL)
+
+    # Step 2: HTML-escape everything EXCEPT the placeholders (null bytes safe)
     html = _escape_html(text)
 
+    # Step 3: Markdown processing (headings, emphasis, lists, etc.)
     # Headings
     html = re.sub(r"^### (.+)$",
         r'<h3 style="font-family:Arial,sans-serif;font-size:15px;margin:16px 0 4px 0;">\1</h3>',
@@ -283,44 +362,10 @@ def _md_to_html_simple(text):
         r'<h1 style="font-family:Arial,sans-serif;font-size:20px;margin:24px 0 8px 0;">\1</h1>',
         html, flags=re.MULTILINE)
 
-    # Inline emphasis
+    # Inline emphasis (safe — code content already extracted)
     html = re.sub(r"\*\*\*(.+?)\*\*\*", r"<strong><em>\1</em></strong>", html)
     html = re.sub(r"\*\*(.+?)\*\*",     r"<strong>\1</strong>", html)
     html = re.sub(r"\*(.+?)\*",         r"<em>\1</em>", html)
-
-    # Fenced code blocks — pygments inline styles if available, plain fallback
-    _pre_style = (
-        "display:block;background:#f8f8f8;color:#333;"
-        "padding:8px 12px;border-radius:3px;border:1px solid #e0e0e0;"
-        "font-family:'Courier New',Courier,monospace;font-size:12px;"
-        "white-space:pre;overflow-x:auto;margin:8px 0;"
-    )
-
-    def _fence(m):
-        lang = m.group(1) or ""
-        # Un-escape HTML entities in code before highlighting
-        code_raw = m.group(2).replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-        try:
-            from pygments import highlight
-            from pygments.lexers import get_lexer_by_name, TextLexer
-            from pygments.formatters import HtmlFormatter
-            try:
-                lexer = get_lexer_by_name(lang) if lang else TextLexer()
-            except Exception:
-                lexer = TextLexer()
-            formatter = HtmlFormatter(
-                style="friendly",
-                noclasses=True,   # inline styles — no <head> needed
-                nowrap=True,      # no wrapping <div>, we supply the <pre>
-            )
-            highlighted = highlight(code_raw, lexer, formatter)
-            return f'<pre style="{_pre_style}">{highlighted}</pre>'
-        except ImportError:
-            # Pygments not installed — plain fallback
-            code_escaped = code_raw.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            return f'<pre style="{_pre_style}"><code>{code_escaped}</code></pre>'
-
-    html = re.sub(r"```(\w*)\n(.*?)```", _fence, html, flags=re.DOTALL)
 
     # Inline code
     html = re.sub(
@@ -332,16 +377,18 @@ def _md_to_html_simple(text):
 
     # Links
     def _link(m):
-        text = m.group(1)
+        link_text = m.group(1)
         url = m.group(2).replace('&quot;', '"')
         if not _validate_url(url):
-            return text
+            return link_text
         url = url.replace('"', '&quot;')
-        return f'<a href="{url}" style="color:#0066cc;" rel="noopener noreferrer">{text}</a>'
+        return f'<a href="{url}" style="color:#0066cc;" rel="noopener noreferrer">{link_text}</a>'
     html = re.sub(r"\[(.+?)\]\((.+?)\)", _link, html)
 
     # Horizontal rule
-    html = re.sub(r"^---+$", r'<hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">', html, flags=re.MULTILINE)
+    html = re.sub(r"^---+$",
+        r'<hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">',
+        html, flags=re.MULTILINE)
 
     # Blockquote (> lines)
     def _quoteblock(m):
@@ -354,29 +401,40 @@ def _md_to_html_simple(text):
     html = re.sub(r"(^&gt;.*\n?)+", _quoteblock, html, flags=re.MULTILINE)
 
     # Unordered lists
-    def _listblock(m):
+    def _ul_block(m):
         items = re.findall(r"^[-*] (.+)$", m.group(0), re.MULTILINE)
-        lis = "".join(
-            f'<li style="margin:2px 0;">{i}</li>' for i in items
-        )
+        lis = "".join(f'<li style="margin:2px 0;">{i}</li>' for i in items)
         return f'<ul style="margin:8px 0;padding-left:20px;">{lis}</ul>'
-    html = re.sub(r"(^[-*] .+\n?)+", _listblock, html, flags=re.MULTILINE)
+    html = re.sub(r"(^[-*] .+\n?)+", _ul_block, html, flags=re.MULTILINE)
 
-    # Paragraphs
+    # Ordered lists
+    def _ol_block(m):
+        items = re.findall(r"^\d+\. (.+)$", m.group(0), re.MULTILINE)
+        lis = "".join(f'<li style="margin:2px 0;">{i}</li>' for i in items)
+        return f'<ol style="margin:8px 0;padding-left:20px;">{lis}</ol>'
+    html = re.sub(r"(^\d+\. .+\n?)+", _ol_block, html, flags=re.MULTILINE)
+
+    # Step 4: Paragraphs — restore code placeholders as block elements
+    _p_style = (
+        'margin:0 0 10px 0;font-family:Arial,Helvetica,sans-serif;'
+        'font-size:14px;line-height:1.5;color:#000;'
+    )
     paragraphs = re.split(r"\n{2,}", html.strip())
     wrapped = []
     for p in paragraphs:
         p = p.strip()
         if not p:
             continue
-        if p.startswith("<"):
+        # Code placeholder — restore rendered block, no <p> wrapping
+        m = re.fullmatch(r"\x00WCODE(\d+)\x00", p)
+        if m:
+            wrapped.append(_blocks[int(m.group(1))])
+        elif p.startswith("<"):
             wrapped.append(p)
         else:
             p = p.replace("\n", "<br>\n")
-            wrapped.append(
-                f'<p style="margin:0 0 10px 0;font-family:Arial,Helvetica,sans-serif;'
-                f'font-size:14px;line-height:1.5;color:#000;">{p}</p>'
-            )
+            wrapped.append(f'<p style="{_p_style}">{p}</p>')
+
     return "\n".join(wrapped)
 
 
@@ -518,10 +576,9 @@ def send_email(
     use_tls   = cfg.get("tls", os.environ.get("WAGGLE_TLS", "true").lower() != "false")
 
     # Auto-fetch quoted body from IMAP when replying
+    quoted_plain = quoted_html = None
     if in_reply_to:
-        quoted = fetch_quoted_body(in_reply_to, config=cfg)
-        if quoted:
-            body_md = body_md.rstrip() + quoted
+        quoted_plain, quoted_html = fetch_quoted_body(in_reply_to, config=cfg)
 
     # Security: sanitize headers
     subject     = _sanitize_header(subject)
@@ -536,18 +593,24 @@ def send_email(
     envelope_from = _validate_email(from_addr)
     envelope_to   = [_validate_email(to)]
 
-    # Build body parts
+    # Build body parts — render markdown first, then append quoted content after
     plain = _md_to_plain(body_md)
 
     if rich:
         try:
-            html_body = _md_to_html_rich(body_md)
+            html_body_rendered = _md_to_html_rich(body_md)
         except ImportError:
-            html_body = _md_to_html_simple(body_md)
-        html_full = _wrap_html_rich(html_body)
+            html_body_rendered = _md_to_html_simple(body_md)
+        html_full = _wrap_html_rich(html_body_rendered)
     else:
-        html_body = _md_to_html_simple(body_md)
-        html_full = _wrap_html_simple(html_body)
+        html_body_rendered = _md_to_html_simple(body_md)
+        html_full = _wrap_html_simple(html_body_rendered)
+
+    # Append quoted content AFTER rendering (not into markdown source)
+    if quoted_plain:
+        plain += quoted_plain
+    if quoted_html:
+        html_full = html_full.replace("</body>", f"\n{quoted_html}\n</body>")
 
     # Build MIME structure
     alt = MIMEMultipart("alternative")
