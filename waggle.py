@@ -351,15 +351,17 @@ def _md_to_html_simple(text):
     html = _escape_html(text)
 
     # Step 3: Markdown processing (headings, emphasis, lists, etc.)
-    # Headings
+    # Headings — append \n\n so they always create a paragraph boundary,
+    # preventing the following content from being absorbed into the heading's
+    # HTML block and losing <br> conversion on single newlines.
     html = re.sub(r"^### (.+)$",
-        r'<h3 style="font-family:Calibri,Aptos,Arial,sans-serif;font-size:13pt;margin:16px 0 4px 0;">\1</h3>',
+        r'<h3 style="font-family:Calibri,Aptos,Arial,sans-serif;font-size:13pt;margin:16px 0 4px 0;">\1</h3>\n',
         html, flags=re.MULTILINE)
     html = re.sub(r"^## (.+)$",
-        r'<h2 style="font-family:Calibri,Aptos,Arial,sans-serif;font-size:15pt;margin:20px 0 6px 0;">\1</h2>',
+        r'<h2 style="font-family:Calibri,Aptos,Arial,sans-serif;font-size:15pt;margin:20px 0 6px 0;">\1</h2>\n',
         html, flags=re.MULTILINE)
     html = re.sub(r"^# (.+)$",
-        r'<h1 style="font-family:Calibri,Aptos,Arial,sans-serif;font-size:18pt;margin:24px 0 8px 0;">\1</h1>',
+        r'<h1 style="font-family:Calibri,Aptos,Arial,sans-serif;font-size:18pt;margin:24px 0 8px 0;">\1</h1>\n',
         html, flags=re.MULTILINE)
 
     # Inline emphasis (safe — code content already extracted)
