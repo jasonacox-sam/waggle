@@ -1,0 +1,10 @@
+LICENSE
+README.md
+pyproject.toml
+waggle.py
+waggle_mail.egg-info/PKG-INFO
+waggle_mail.egg-info/SOURCES.txt
+waggle_mail.egg-info/dependency_links.txt
+waggle_mail.egg-info/entry_points.txt
+waggle_mail.egg-info/requires.txt
+waggle_mail.egg-info/top_level.txt

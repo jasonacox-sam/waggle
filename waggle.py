@@ -353,13 +353,13 @@ def _md_to_html_simple(text):
     # Step 3: Markdown processing (headings, emphasis, lists, etc.)
     # Headings
     html = re.sub(r"^### (.+)$",
-        r'<h3 style="font-family:Arial,sans-serif;font-size:15px;margin:16px 0 4px 0;">\1</h3>',
+        r'<h3 style="font-family:Calibri,Aptos,Arial,sans-serif;font-size:13pt;margin:16px 0 4px 0;">\1</h3>',
         html, flags=re.MULTILINE)
     html = re.sub(r"^## (.+)$",
-        r'<h2 style="font-family:Arial,sans-serif;font-size:17px;margin:20px 0 6px 0;">\1</h2>',
+        r'<h2 style="font-family:Calibri,Aptos,Arial,sans-serif;font-size:15pt;margin:20px 0 6px 0;">\1</h2>',
         html, flags=re.MULTILINE)
     html = re.sub(r"^# (.+)$",
-        r'<h1 style="font-family:Arial,sans-serif;font-size:20px;margin:24px 0 8px 0;">\1</h1>',
+        r'<h1 style="font-family:Calibri,Aptos,Arial,sans-serif;font-size:18pt;margin:24px 0 8px 0;">\1</h1>',
         html, flags=re.MULTILINE)
 
     # Inline emphasis (safe — code content already extracted)
@@ -416,8 +416,8 @@ def _md_to_html_simple(text):
 
     # Step 4: Paragraphs — restore code placeholders as block elements
     _p_style = (
-        'margin:0 0 10px 0;font-family:Arial,Helvetica,sans-serif;'
-        'font-size:14px;line-height:1.5;color:#000;'
+        'margin:0 0 10px 0;font-family:Calibri,Aptos,Arial,sans-serif;'
+        'font-size:11pt;line-height:1.5;color:#000;'
     )
     paragraphs = re.split(r"\n{2,}", html.strip())
     wrapped = []
@@ -441,8 +441,8 @@ def _md_to_html_simple(text):
 def _wrap_html_simple(body_html):
     """Minimal HTML wrapper — no <head> CSS, just a font on the body."""
     return (
-        '<!DOCTYPE html><html><body style="font-family:Arial,Helvetica,sans-serif;'
-        'font-size:14px;color:#000;line-height:1.5;max-width:700px;">\n'
+        '<!DOCTYPE html><html><body style="font-family:Calibri,Aptos,Arial,sans-serif;'
+        'font-size:11pt;color:#000;line-height:1.5;max-width:700px;">\n'
         + body_html
         + "\n</body></html>"
     )

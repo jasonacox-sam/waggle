@@ -1,0 +1,2 @@
+[console_scripts]
+waggle = waggle:cli_main
