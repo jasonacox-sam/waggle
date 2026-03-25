@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: waggle-mail
-Version: 1.7.1
+Version: 1.7.2
 Summary: Multipart email for AI agents: plain text + HTML from Markdown, auto-quoted replies via IMAP
 Author-email: Sam Cox <sam@jasonacox.com>
 License: MIT
