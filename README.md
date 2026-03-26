@@ -1,8 +1,8 @@
 # waggle-mail 📬
 
-**Multipart email for AI agents who write letters.**
+**Full email client for AI agents. IMAP + SMTP. Read, reply, move, download attachments — all from Markdown.**
 
-`waggle-mail` sends plain text + HTML email from a single Markdown source — clean prose for AI agents reading with tools like [himalaya](https://github.com/soywod/himalaya), beautifully rendered HTML for humans in any mail client. Write once, looks right everywhere.
+`waggle-mail` is a complete email workflow library for AI agents: list your inbox, read messages (with threading headers auto-extracted for replies), send rich multipart email rendered from Markdown, move messages between folders, and download attachments — all from one tool, with no external dependencies beyond standard Python.
 
 Built by [Sam Cox](https://github.com/jasonacox-sam), AI assistant to [jasonacox](https://github.com/jasonacox), for the [OpenClaw](https://github.com/openclaw/openclaw) ecosystem.
 
@@ -10,13 +10,15 @@ Built by [Sam Cox](https://github.com/jasonacox-sam), AI assistant to [jasonacox
 
 ## Why
 
-Most email tools optimize for humans. AI agents reading email with CLI tools get mangled HTML — `<p>` tags, `&amp;`, inline styles — where they expected words. `waggle-mail` generates clean, readable plain text (raw Markdown) alongside the HTML so both audiences get what they need.
+Most email tools optimize for humans. AI agents need something different:
 
-It handles threading headers (`In-Reply-To`, `References`) so multi-turn correspondence stays threaded in any mail client.
+- **Read** email and get threading headers *automatically* — no separate step to look up Message-IDs before replying
+- **Reply** with proper `In-Reply-To` + `References` so threads stay threaded in every mail client
+- **Quoted context** — waggle fetches the original from IMAP and appends an Outlook-style block automatically
+- **Move** messages between folders without a separate IMAP client
+- **Plain text = raw Markdown** — AI agents reading with tools like [himalaya](https://github.com/soywod/himalaya) get clean, parseable Markdown, not mangled HTML
 
-**Reply quoting — something himalaya can't do alone.** Pass `--in-reply-to` with a Message-ID and waggle automatically fetches the original message from IMAP, formats an Outlook-style attributed quote block, and appends it to your reply. Works even after you've moved the original to a different folder.
-
-Zero required dependencies. No external services. Just SMTP (+ optional IMAP for reply quoting).
+Zero required dependencies. No external services. Pure Python stdlib + optional pygments for syntax highlighting.
 
 ---
 
@@ -26,58 +28,97 @@ Zero required dependencies. No external services. Just SMTP (+ optional IMAP for
 pip install waggle-mail
 ```
 
-For syntax-highlighted code blocks in HTML output:
+With syntax-highlighted code blocks:
 
 ```bash
 pip install "waggle-mail[rich]"
 ```
 
-Or copy `waggle.py` directly into your project — zero-dependency fallback mode always works.
+---
+
+## The complete workflow
+
+```
+waggle list                        → see what's new
+waggle read <uid>                  → body + threading headers + reply template
+send_email(in_reply_to=...)        → reply with quoted thread
+waggle move <uid> INBOX.Processed  → archive after sending
+```
 
 ---
 
 ## Configuration
 
-### SMTP (required)
-
 ```bash
+# SMTP (required)
 export WAGGLE_HOST=smtp.example.com
-export WAGGLE_PORT=465            # default: 465
+export WAGGLE_PORT=465            # default: 465 (SSL)
 export WAGGLE_USER=you@example.com
 export WAGGLE_PASS=yourpassword
-export WAGGLE_FROM=you@example.com   # optional, defaults to WAGGLE_USER
-export WAGGLE_NAME="Your Name"       # optional display name
-export WAGGLE_TLS=true               # false for STARTTLS
-```
+export WAGGLE_FROM=you@example.com
+export WAGGLE_NAME="Your Name"
+export WAGGLE_TLS=true            # false for STARTTLS
 
-### IMAP (optional — enables automatic reply quoting)
-
-```bash
+# IMAP (required for list/read/move/attach/reply-quoting)
 export WAGGLE_IMAP_HOST=imap.example.com
-export WAGGLE_IMAP_PORT=993          # default: 993
-export WAGGLE_IMAP_TLS=true          # default: true
+export WAGGLE_IMAP_PORT=993       # default: 993
+export WAGGLE_IMAP_TLS=true
 # WAGGLE_USER / WAGGLE_PASS are reused for IMAP auth
 ```
 
-Or pass a `config` dict directly to `send_email()`.
-
 ---
 
-## Usage
+## CLI
 
-### CLI
+waggle uses subcommands:
+
+### List inbox
 
 ```bash
-waggle \
-  --to "friend@example.com" \
-  --subject "Hello from waggle" \
-  --body "# Hi there\n\nThis is **markdown** and it works for both humans and AI agents."
+waggle list
+waggle list --folder INBOX.Processed --limit 30
 ```
 
-**Reply with auto-quoted thread** (requires `WAGGLE_IMAP_HOST`):
+Output: `UID | UNREAD | FROM | SUBJECT | DATE`
+
+### Read a message
 
 ```bash
-waggle \
+waggle read 42
+waggle read 42 --folder INBOX.Processed
+```
+
+Prints the full message body, then a threading section with `message_id`, `reply_references`, `reply_subject`, and a **ready-to-paste Python reply template** with all fields pre-filled. No separate step to look up Message-IDs.
+
+### Move a message
+
+```bash
+waggle move 42 INBOX.Processed           # INBOX → INBOX.Processed
+waggle move 42 INBOX --folder INBOX.Processed  # move back
+```
+
+Uses UID-based COPY+DELETE+EXPUNGE — immune to sequence number shifts from prior expunges.
+
+### Download attachments
+
+```bash
+waggle attach 42
+waggle attach 42 --folder INBOX.Processed --dest /tmp/attachments/
+```
+
+### Send a new email
+
+```bash
+waggle send \
+  --to "friend@example.com" \
+  --subject "Hello from waggle" \
+  --body "# Hi\n\nThis is **markdown** and it works for both humans and AI agents."
+```
+
+### Reply with auto-quoted thread
+
+```bash
+waggle send \
   --to "friend@example.com" \
   --subject "Re: Hello" \
   --body "Great to hear from you." \
@@ -85,62 +126,119 @@ waggle \
   --references "<original-message-id@mail.example.com>"
 ```
 
-waggle fetches the original from IMAP (searches all folders — works after moving to
-a processed folder), wraps it in an Outlook-style blockquote, and appends it to your
-reply. No extra flags needed beyond `--in-reply-to`.
+waggle fetches the original from IMAP (searches all folders — works even after moving to a processed folder), wraps it in an Outlook-style attributed blockquote, and appends it. No extra configuration needed.
 
-**With file attachment:**
+### Rich HTML layout (opt-in)
 
 ```bash
-waggle \
-  --to "friend@example.com" \
-  --subject "Here's that file" \
-  --body "See attached." \
-  --attach report.pdf \
-  --attach screenshot.png
+waggle send --to "friend@example.com" --subject "Newsletter" --body "# Hello" --rich
 ```
 
-**Rich HTML layout** (styled template with full `<head>` CSS — opt-in):
+Default HTML uses inline styles — Gmail-safe, spam-filter-friendly, looks like a normal Outlook email.
+`--rich` adds a full `<head>` CSS styled layout. Best for Outlook/Apple Mail; Gmail strips `<head>` CSS.
 
-```bash
-waggle \
-  --to "friend@example.com" \
-  --subject "Newsletter" \
-  --body "# Hello\n\nThis uses the full styled layout." \
-  --rich
-```
+---
 
-> The default HTML uses inline styles only — Gmail-safe, spam-filter-friendly,
-> looks like a normal email from Outlook or Apple Mail.
-> Use `--rich` when you want a polished styled layout with a centered column,
-> custom typography, and full syntax-highlighted code blocks.
-> Note: Gmail strips `<head>` CSS, so `--rich` is best for Outlook/Apple Mail.
-
-### Python
+## Python API
 
 ```python
-from waggle import send_email
+from waggle import send_email, list_inbox, read_message, move_message, download_attachments, check_recently_sent
+```
+
+### List inbox
+
+```python
+messages = list_inbox(folder="INBOX", limit=20)
+for m in messages:
+    print(m["uid"], m["from_name"], m["subject"], m["date"], "unread:", m["unread"])
+```
+
+### Read a message
+
+```python
+msg = read_message("42", folder="INBOX")
+
+msg["body_plain"]       # plain text body
+msg["body_html"]        # HTML body (if present)
+msg["from_addr"]        # sender email
+msg["from_name"]        # sender display name
+msg["subject"]          # subject line
+msg["date"]             # date string
+msg["message_id"]       # ← pass as in_reply_to when replying
+msg["reply_references"] # ← pass as references when replying
+msg["reply_subject"]    # subject prefixed with "Re: "
+msg["attachments"]      # list of {filename, content_type, size}
+```
+
+### Full reply workflow
+
+```python
+msg = read_message("42", folder="INBOX")
 
 send_email(
-    to="friend@example.com",
-    subject="Hello",
-    body_md="# Hi\n\nThis is **markdown**.",
-    cc="another@example.com",
+    to=msg["from_addr"],
+    subject=msg["reply_subject"],
+    body_md="""Hi there,
+
+Thanks for your message — here's my reply.
+
+Let me know if you have questions.""",
+    in_reply_to=msg["message_id"],
+    references=msg["reply_references"],
     from_name="Sam",
-    attachments=["report.pdf"],  # optional
-    rich=False,                  # True for styled layout
+)
+
+move_message("42", "INBOX.Processed")
+```
+
+### Move a message
+
+```python
+move_message("42", dest_folder="INBOX.Processed", src_folder="INBOX")
+# src_folder defaults to "INBOX"
+move_message("42", "INBOX.Processed")
+```
+
+### Download attachments
+
+```python
+paths = download_attachments("42", folder="INBOX", dest_dir="/tmp/attachments/")
+for p in paths:
+    print(p)  # full path to saved file
+```
+
+### Prevent duplicate sends
+
+```python
+from waggle import check_recently_sent, send_email
+
+# Guard against retrying a send that already went through
+if not check_recently_sent("friend@example.com", "Re: Hello", within_minutes=5):
+    send_email(to="friend@example.com", subject="Re: Hello", body_md="...")
+```
+
+`send_email()` automatically logs every successful send. `check_recently_sent()` reads that log.
+
+### Send with attachments
+
+```python
+send_email(
+    to="friend@example.com",
+    subject="Report",
+    body_md="See attached.",
+    cc="other@example.com",
+    attachments=["/path/to/report.pdf", "/path/to/chart.png"],
+    from_name="Sam",
 )
 ```
 
-With a config dict (no environment variables needed):
+### Config dict (no environment variables)
 
 ```python
 send_email(
     to="friend@example.com",
-    subject="Re: Hello",
-    body_md="Great to hear from you.",
-    in_reply_to="<original-message-id@mail.example.com>",
-    references="<original-message-id@mail.example.com>",
+    subject="Hello",
+    body_md="Hi!",
     config={
         "host": "smtp.example.com",
         "port": 465,
@@ -155,18 +253,6 @@ send_email(
 
 ---
 
-## OpenClaw Skill
-
-`waggle-mail` ships a `SKILL.md` — install it as a workspace skill so your OpenClaw agent uses waggle for all outbound email automatically:
-
-```bash
-git clone https://github.com/jasonacox-sam/waggle-mail.git ~/.openclaw/workspace/skills/waggle
-```
-
-Then add your SMTP and IMAP credentials to `~/.openclaw/openclaw.json` under `skills.entries.waggle.env`. See [SKILL.md](SKILL.md) for the full setup.
-
----
-
 ## Markdown support
 
 | Syntax | Result |
@@ -177,26 +263,43 @@ Then add your SMTP and IMAP credentials to `~/.openclaw/openclaw.json` under `sk
 | `` `inline code` `` | `<code>` with monospace |
 | ` ```python ` fenced block | syntax-highlighted `<pre>` (pygments inline styles) |
 | `[text](url)` | `<a href>` |
-| `- item` | `<ul><li>` |
-| `1. item` | `<ol><li>` |
+| `- item` / `1. item` | `<ul>` / `<ol>` |
 | `> quote` | `<blockquote>` |
 | `---` | `<hr>` |
 
-Plain text body is **raw Markdown** — AI agents reading with himalaya or similar tools receive the original source, not a stripped approximation. Markdown is a first-class format for AI readers.
+Plain text body is **raw Markdown** — AI agents get clean, parseable source. Markdown is a first-class format for machine readers.
 
 ---
 
-## Example Output
+## Default font
 
-The screenshot below shows `waggle` v1.7.2 rendering a formatting showcase email in Outlook (dark mode) — headings, paragraphs, bullet and numbered lists, blockquote, code block, and inline formatting, all generated from a single Markdown source:
+waggle renders body text in **Aptos 12pt** — the default font in Outlook and Microsoft 365 since 2023. Emails look native in Outlook without any extra configuration. Fallback chain: Aptos → Calibri → Arial → sans-serif.
 
-![waggle v1.7.2 formatting showcase](https://raw.githubusercontent.com/jasonacox-sam/assets/main/waggle/waggle-showcase-20260324.jpg)
+---
+
+## OpenClaw Skill
+
+`waggle-mail` ships a `SKILL.md` — install it as a workspace skill so your OpenClaw agent uses waggle for all email automatically:
+
+```bash
+git clone https://github.com/jasonacox-sam/waggle-mail.git ~/.openclaw/workspace/skills/waggle
+```
+
+Add credentials to `~/.openclaw/openclaw.json` under `skills.entries.waggle.env`. See [SKILL.md](SKILL.md) for the complete setup and workflow.
+
+---
+
+## Example output
+
+The screenshot below shows waggle rendering a formatting showcase email in Outlook (dark mode) — headings, paragraphs, bullet and numbered lists, blockquote, code block, and inline formatting, all from a single Markdown source:
+
+![waggle formatting showcase](https://raw.githubusercontent.com/jasonacox-sam/assets/main/waggle/waggle-showcase-20260324.jpg)
 
 ---
 
 ## The name
 
-In a honeybee colony, scout bees communicate the location and quality of a food source through the waggle dance — a figure-eight movement that encodes bearing (relative to the sun), distance (duration of the waggle run), and quality (enthusiasm of the dance). Other bees use this to decide whether the site is worth visiting.
+In a honeybee colony, scout bees communicate the location and quality of a food source through the waggle dance — a figure-eight movement that encodes bearing, distance, and quality. Other bees use this to decide whether the site is worth visiting.
 
 A task report is a scalar: *here is a thing.* A waggle is a vector: *here is a thing, it is this far in this direction, and it is this good.*
 
