@@ -1,4 +1,0 @@
-
-[rich]
-markdown>=3.4
-pygments>=2.14

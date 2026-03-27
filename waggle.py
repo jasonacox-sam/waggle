@@ -82,7 +82,7 @@ Configuration (environment variables):
                      WAGGLE_USER / WAGGLE_PASS are reused for IMAP auth.
 """
 
-__version__ = "1.8.3"
+__version__ = "1.8.5"
 
 import os
 import re
@@ -912,6 +912,35 @@ def _md_to_html_simple(text):
         )
     html = re.sub(r"(^&gt;.*\n?)+", _quoteblock, html, flags=re.MULTILINE)
 
+    def _table_block(m):
+        lines = [l.strip() for l in m.group(0).strip().splitlines() if l.strip()]
+        # Separate separator rows (e.g. |---|---|) from content rows
+        content_rows = [l for l in lines if not re.match(r"^\|[-|: ]+\|$", l)]
+        if not content_rows:
+            return m.group(0)
+        def parse_cells(line):
+            return [c.strip() for c in line.strip().strip("|").split("|")]
+        th_cells = parse_cells(content_rows[0])
+        th_html = "".join(
+            f'<th style="padding:6px 10px;text-align:left;border:1px solid #ccc;">{c}</th>'
+            for c in th_cells
+        )
+        tbody_rows = ""
+        for i, row in enumerate(content_rows[1:]):
+            bg = "#f5f8ff" if i % 2 == 0 else "#ffffff"
+            td_html = "".join(
+                f'<td style="padding:6px 10px;border:1px solid #ddd;">{c}</td>'
+                for c in parse_cells(row)
+            )
+            tbody_rows += f'<tr style="background:{bg};">{td_html}</tr>\n'
+        return (
+            '<table style="border-collapse:collapse;width:100%;margin:12px 0;'
+            'font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;">\n'
+            f'<thead><tr style="background:#0d47a1;color:#fff;">{th_html}</tr></thead>\n'
+            f'<tbody>{tbody_rows}</tbody></table>'
+        )
+    html = re.sub(r"(^\|.+\|[ \t]*\n?)+", _table_block, html, flags=re.MULTILINE)
+
     def _ul_block(m):
         items = re.findall(r"^[-*] (.+)$", m.group(0), re.MULTILINE)
         lis = "".join(f'<li style="margin:2px 0;">{i}</li>' for i in items)
@@ -937,7 +966,7 @@ def _md_to_html_simple(text):
         m = re.fullmatch(r"\x00WCODE(\d+)\x00", p)
         if m:
             wrapped.append(_blocks[int(m.group(1))])
-        elif p.startswith("<"):
+        elif re.match(r"<(h[1-6]|ul|ol|blockquote|hr|div|table|pre)[\s>]", p):
             wrapped.append(p)
         else:
             p = p.replace("\n", "<br>\n")
