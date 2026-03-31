@@ -1129,9 +1129,9 @@ def _wrap_html_rich(body_html):
 <head>
 <meta charset="utf-8">
 <style>
-  body {{ font-family: Georgia, serif; font-size: 16px;
+  body {{ font-family: Aptos, Calibri, Arial, sans-serif; font-size: 16px;
          color: #222; max-width: 680px; margin: 40px auto; padding: 0 24px; }}
-  h1, h2, h3 {{ font-family: system-ui, sans-serif; }}
+  h1, h2, h3 {{ font-family: Aptos, Calibri, Arial, sans-serif; }}
   hr {{ border: none; border-top: 1px solid #ddd; margin: 32px 0; }}
   a {{ color: #2563eb; }}
   blockquote {{ border-left: 3px solid #ccc; margin: 0; padding: 0 0 0 16px;
