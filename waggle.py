@@ -91,7 +91,7 @@ Configuration (environment variables):
                      WAGGLE_USER / WAGGLE_PASS are reused for IMAP auth.
 """
 
-__version__ = "1.9.0"
+__version__ = "1.9.1"
 
 import os
 import re
@@ -263,7 +263,8 @@ def _build_cfg(config=None):
         "port":       int(cfg.get("port")   or os.environ.get("WAGGLE_PORT", "465")),
         "from_addr":  cfg.get("from_addr")  or os.environ.get("WAGGLE_FROM", cfg.get("user") or os.environ.get("WAGGLE_USER", "")),
         "from_name":  cfg.get("from_name")  or os.environ.get("WAGGLE_NAME", ""),
-        "tls":        cfg.get("tls", os.environ.get("WAGGLE_TLS", "true").lower() != "false"),
+        "tls":         cfg.get("tls", os.environ.get("WAGGLE_TLS", "true").lower() != "false"),
+        "sent_folder":  cfg.get("sent_folder") or os.environ.get("WAGGLE_SENT_FOLDER", ""),
     }
 
 
@@ -278,6 +279,68 @@ def _imap_connect(cfg):
         m = imaplib.IMAP4(cfg["imap_host"], cfg["imap_port"])
     m.login(cfg["user"], cfg["password"])
     return m, cfg["imap_host"]
+
+
+# Try common Sent folder names in order of modern prevalence
+_SENT_FOLDER_CANDIDATES = (
+    "Sent",        # Gmail, modern IMAP servers
+    "Sent Items",  # Outlook / Exchange
+    "INBOX.Sent",  # Courier, older hierarchical IMAP
+)
+
+
+def _imap_append_sent(cfg, msg_bytes, folder=None):
+    """
+    Append a sent message to the IMAP Sent folder.
+
+    Args:
+        cfg:       Config dict from _build_cfg().
+        msg_bytes: RFC822 message as bytes.
+        folder:    Explicit folder name, or None for auto-detect.
+
+    Returns the folder name used, or None on failure.
+    """
+    if not msg_bytes or not isinstance(msg_bytes, bytes):
+        logger.warning("Invalid message bytes for IMAP append")
+        return None
+
+    m, _ = _imap_connect(cfg)
+    if m is None:
+        return None
+
+    try:
+        if folder:
+            _validate_folder_name(folder)
+            try:
+                status, _ = m.append(folder, r"(\Seen)", None, msg_bytes)
+                if status == "OK":
+                    return folder
+            except Exception as exc:
+                logger.warning(f"IMAP append to {folder!r} failed: {exc}")
+                return None
+
+        for candidate in _SENT_FOLDER_CANDIDATES:
+            try:
+                status, _ = m.select(candidate, readonly=True)
+                if status != "OK":
+                    continue
+                try:
+                    m.close()
+                except Exception:
+                    pass
+                status, _ = m.append(candidate, r"(\Seen)", None, msg_bytes)
+                if status == "OK":
+                    return candidate
+            except Exception:
+                continue
+
+        logger.warning("No suitable Sent folder found for IMAP append")
+        return None
+    finally:
+        try:
+            m.logout()
+        except Exception:
+            pass
 
 
 def _imap_find_uid(m, mid):
@@ -506,7 +569,7 @@ def list_inbox(folder="INBOX", limit=20, config=None):
             pass
 
 
-def read_message(uid, folder="INBOX", config=None):
+def read_message(uid, folder="INBOX", mark_read=False, config=None):
     """
     Read a full email message by IMAP sequence number / UID.
 
@@ -514,9 +577,11 @@ def read_message(uid, folder="INBOX", config=None):
     Use msg["message_id"] and msg["reply_references"] for waggle send_email().
 
     Args:
-        uid:    IMAP sequence number (as string or int)
-        folder: IMAP folder (default: INBOX)
-        config: Optional config dict
+        uid:       IMAP sequence number (as string or int)
+        folder:    IMAP folder (default: INBOX)
+        mark_read: If True, mark the message as read (\\Seen) on the server.
+                   Default False preserves existing behavior (BODY.PEEK[], readonly=True).
+        config:    Optional config dict
 
     Returns dict keys:
         uid, folder, message_id, references, in_reply_to, reply_references,
@@ -530,19 +595,28 @@ def read_message(uid, folder="INBOX", config=None):
     Note: attachments list contains metadata only — call download_attachments()
     to save files to disk.
     """
+    if not isinstance(mark_read, bool):
+        raise TypeError(f"mark_read must be bool, got {type(mark_read).__name__}")
+
     cfg = _build_cfg(config)
+
+    if mark_read and not cfg.get("imap_host"):
+        logger.warning("mark_read=True ignored: IMAP not configured")
+        mark_read = False
+
     m, _ = _imap_connect(cfg)
     if m is None:
         raise RuntimeError("IMAP not configured — set WAGGLE_IMAP_HOST")
 
     try:
         _validate_folder_name(folder)
-        status, _ = m.select(folder, readonly=True)
+        status, _ = m.select(folder, readonly=not mark_read)
         if status != "OK":
             raise RuntimeError(f"Could not select folder: {folder!r}")
 
         uid_bytes = str(uid).encode() if not isinstance(uid, bytes) else uid
-        typ, data = m.fetch(uid_bytes, "(BODY.PEEK[])")
+        fetch_cmd = "(BODY[])" if mark_read else "(BODY.PEEK[])"
+        typ, data = m.fetch(uid_bytes, fetch_cmd)
         if typ != "OK" or not data or data[0] is None:
             raise RuntimeError(f"Message {uid} not found in {folder}")
 
@@ -1321,6 +1395,8 @@ def send_email(
     attachments=None,
     rich=False,
     config=None,
+    save_sent=True,
+    sent_folder=None,
 ):
     """
     Send a multipart email rendered from Markdown.
@@ -1340,7 +1416,15 @@ def send_email(
         attachments:  List of file paths to attach.
         rich:         Enable rich HTML rendering (opt-in, stripped by Gmail).
         config:       Config dict (falls back to env vars).
+        save_sent:    If True (default), append sent message to IMAP Sent folder.
+                      Silently skips if IMAP is not configured.
+        sent_folder:  Explicit IMAP Sent folder name, or None for auto-detect.
+                      Auto-detection order: "Sent", "Sent Items", "INBOX.Sent".
     """
+    if not isinstance(save_sent, bool):
+        raise TypeError(f"save_sent must be bool, got {type(save_sent).__name__}")
+    if sent_folder is not None and not isinstance(sent_folder, str):
+        raise TypeError(f"sent_folder must be str or None, got {type(sent_folder).__name__}")
     cfg = _build_cfg(config)
 
     quoted_plain = quoted_html = None
@@ -1429,6 +1513,14 @@ def send_email(
                 s.login(cfg["user"], cfg["password"])
             s.sendmail(envelope_from, envelope_to, msg.as_string())
 
+    # IMAP Sent folder sync — save sent message server-side
+    if save_sent and cfg.get("imap_host"):
+        try:
+            folder = sent_folder or cfg.get("sent_folder") or None
+            _imap_append_sent(cfg, msg.as_bytes(), folder=folder)
+        except Exception as exc:
+            logger.warning(f"Sent folder append failed (SMTP succeeded): {exc}")
+
     # Log the send so check_recently_sent() can detect duplicates
     _log_sent(to, subject)
 
@@ -1473,13 +1565,16 @@ def reply_all(msg, body_md, *, from_name=None, attachments=None, rich=False, con
         ]
         reply_cc = ", ".join(filtered)
 
+    # Normalize whitespace in references (long chains may have folded CRLF)
+    refs = re.sub(r'[\r\n]+\s*', ' ', msg.get("reply_references", "") or "").strip()
+
     send_email(
         to=msg["from_addr"],
         subject=msg["reply_subject"],
         body_md=body_md,
         cc=reply_cc or None,
         in_reply_to=msg["message_id"],
-        references=msg["reply_references"],
+        references=refs or None,
         from_name=from_name,
         attachments=attachments,
         rich=rich,
@@ -1548,7 +1643,7 @@ def _cli_list(args):
 
 
 def _cli_read(args):
-    msg = read_message(args.uid, folder=args.folder)
+    msg = read_message(args.uid, folder=args.folder, mark_read=getattr(args, 'mark_read', False))
     print("=" * 70)
     print(f"From:    {msg['from_raw']}")
     print(f"To:      {msg['to']}")
@@ -1611,6 +1706,7 @@ def _cli_send(args):
         from_name=getattr(args, "from_name", None),
         attachments=getattr(args, "attach", None),
         rich=getattr(args, "rich", False),
+        save_sent=not getattr(args, "no_save_sent", False),
     )
     print(f"✅ Sent to {args.to}")
 
@@ -1636,6 +1732,8 @@ def main():
     p_read = sub.add_parser("read", help="Read a message (body + threading headers)")
     p_read.add_argument("uid", help="IMAP sequence number")
     p_read.add_argument("--folder", default="INBOX", help="IMAP folder (default: INBOX)")
+    p_read.add_argument("--mark-read", action="store_true", default=False,
+                        help="Mark message as read (\\Seen) on the server")
 
     # --- move ---
     p_move = sub.add_parser("move", help="Move a message to another folder")
@@ -1661,7 +1759,9 @@ def main():
                         help="Message-ID to reply to (enables threading + auto-quote)")
     p_send.add_argument("--references",  default=None)
     p_send.add_argument("--attach",      action="append", default=None, metavar="FILE")
-    p_send.add_argument("--rich",        action="store_true", default=False)
+    p_send.add_argument("--rich",          action="store_true", default=False)
+    p_send.add_argument("--no-save-sent",  action="store_true", default=False,
+                        help="Skip saving to IMAP Sent folder")
 
     args = parser.parse_args()
 
