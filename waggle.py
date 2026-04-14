@@ -1289,17 +1289,74 @@ def _md_to_html_simple(text):
         )
     html = re.sub(r"(^\|.+\|[ \t]*\n?)+", _table_block, html, flags=re.MULTILINE)
 
-    def _ul_block(m):
-        items = re.findall(r"^[-*] (.+)$", m.group(0), re.MULTILINE)
-        lis = "".join(f'<li style="margin:2px 0;">{i}</li>' for i in items)
-        return f'<ul style="margin:8px 0;padding-left:20px;">{lis}</ul>'
-    html = re.sub(r"(^[-*] .+\n?)+", _ul_block, html, flags=re.MULTILINE)
+    def _render_list(lines, base_indent=0):
+        """Recursively render a block of list lines into nested HTML ol/ul."""
+        html_out = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            raw_indent = len(line) - len(line.lstrip())
+            indent = raw_indent - base_indent
+            stripped = line.lstrip()
+            ol_m = re.match(r'^(\d+)\. (.*)', stripped)
+            ul_m = re.match(r'^[-*] (.*)', stripped)
+            if not ol_m and not ul_m:
+                i += 1
+                continue
+            is_ol = bool(ol_m)
+            item_text = ol_m.group(2) if ol_m else ul_m.group(1)
+            tag = 'ol' if is_ol else 'ul'
+            # Collect children (lines more indented than current)
+            children = []
+            j = i + 1
+            while j < len(lines):
+                next_indent = len(lines[j]) - len(lines[j].lstrip())
+                if next_indent > raw_indent:
+                    children.append(lines[j])
+                    j += 1
+                else:
+                    break
+            child_html = _render_list(children, raw_indent + 2) if children else ''
+            li_content = item_text + ('\n' + child_html if child_html else '')
+            # Collect siblings at same indent + same list type
+            siblings = [(tag, li_content)]
+            i = j
+            while i < len(lines):
+                sline = lines[i]
+                s_indent = len(sline) - len(sline.lstrip())
+                if s_indent != raw_indent:
+                    break
+                s_stripped = sline.lstrip()
+                s_ol = re.match(r'^(\d+)\. (.*)', s_stripped)
+                s_ul = re.match(r'^[-*] (.*)', s_stripped)
+                if not s_ol and not s_ul:
+                    break
+                s_is_ol = bool(s_ol)
+                if s_is_ol != is_ol:
+                    break
+                s_text = s_ol.group(2) if s_ol else s_ul.group(1)
+                s_children = []
+                k = i + 1
+                while k < len(lines):
+                    nk_indent = len(lines[k]) - len(lines[k].lstrip())
+                    if nk_indent > s_indent:
+                        s_children.append(lines[k])
+                        k += 1
+                    else:
+                        break
+                s_child_html = _render_list(s_children, s_indent + 2) if s_children else ''
+                s_li = s_text + ('\n' + s_child_html if s_child_html else '')
+                siblings.append((tag, s_li))
+                i = k
+            margin = 'margin:8px 0' if indent == 0 else 'margin:2px 0'
+            lis = ''.join(f'<li style="margin:2px 0;">{t}</li>' for _, t in siblings)
+            html_out.append(f'<{tag} style="{margin};padding-left:20px;">{lis}</{tag}>')
+        return '\n'.join(html_out)
 
-    def _ol_block(m):
-        items = re.findall(r"^\d+\. (.+)$", m.group(0), re.MULTILINE)
-        lis = "".join(f'<li style="margin:2px 0;">{i}</li>' for i in items)
-        return f'<ol style="margin:8px 0;padding-left:20px;">{lis}</ul>'
-    html = re.sub(r"(^\d+\. .+\n?)+", _ol_block, html, flags=re.MULTILINE)
+    def _list_block(m):
+        lines = m.group(0).rstrip('\n').split('\n')
+        return _render_list(lines)
+    html = re.sub(r'(^[ \t]*(?:\d+\.|[-*]) .+\n?)+', _list_block, html, flags=re.MULTILINE)
 
     _p_style = (
         'margin:0 0 10px 0;font-family:Aptos,Calibri,Arial,sans-serif;'
