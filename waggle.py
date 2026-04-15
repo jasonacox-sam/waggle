@@ -91,7 +91,7 @@ Configuration (environment variables):
                      WAGGLE_USER / WAGGLE_PASS are reused for IMAP auth.
 """
 
-__version__ = "1.9.2"
+__version__ = "1.9.4"
 
 import os
 import re
@@ -1406,15 +1406,19 @@ def _md_to_html_rich(text):
     return html
 
 
-def _wrap_html_rich(body_html):
+_DEFAULT_FONT_FAMILY = "Aptos, Calibri, Arial, sans-serif"
+
+
+def _wrap_html_rich(body_html, font_family=None):
+    ff = font_family or _DEFAULT_FONT_FAMILY
     return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
-  body {{ font-family: Aptos, Calibri, Arial, sans-serif; font-size: 16px;
+  body {{ font-family: {ff}; font-size: 16px;
          color: #222; max-width: 680px; margin: 40px auto; padding: 0 24px; }}
-  h1, h2, h3 {{ font-family: Aptos, Calibri, Arial, sans-serif; }}
+  h1, h2, h3 {{ font-family: {ff}; }}
   hr {{ border: none; border-top: 1px solid #ddd; margin: 32px 0; }}
   a {{ color: #2563eb; }}
   blockquote {{ border-left: 3px solid #ccc; margin: 0; padding: 0 0 0 16px;
@@ -1454,6 +1458,7 @@ def send_email(
     from_name=None,
     attachments=None,
     rich=False,
+    font_family=None,
     config=None,
     save_sent=True,
     sent_folder=None,
@@ -1475,6 +1480,9 @@ def send_email(
         from_name:    Display name for From header.
         attachments:  List of file paths to attach.
         rich:         Enable rich HTML rendering (opt-in, stripped by Gmail).
+        font_family:  Optional CSS font-family string for rich HTML emails (e.g.
+                      "Georgia, serif"). Defaults to "Aptos, Calibri, Arial, sans-serif".
+                      Only used when rich=True.
         config:       Config dict (falls back to env vars).
         save_sent:    If True (default), append sent message to IMAP Sent folder.
                       Silently skips if IMAP is not configured.
@@ -1509,7 +1517,7 @@ def send_email(
             html_body_rendered = _md_to_html_rich(body_md)
         except ImportError:
             html_body_rendered = _md_to_html_simple(body_md)
-        html_full = _wrap_html_rich(html_body_rendered)
+        html_full = _wrap_html_rich(html_body_rendered, font_family=font_family)
     else:
         html_body_rendered = _md_to_html_simple(body_md)
         html_full = _wrap_html_simple(html_body_rendered)
