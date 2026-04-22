@@ -91,7 +91,7 @@ Configuration (environment variables):
                      WAGGLE_USER / WAGGLE_PASS are reused for IMAP auth.
 """
 
-__version__ = "1.9.7"
+__version__ = "1.9.8"
 
 import os
 import re
@@ -267,6 +267,7 @@ def _build_cfg(config=None):
         "from_addr":  cfg.get("from_addr")  or os.environ.get("WAGGLE_FROM", cfg.get("user") or os.environ.get("WAGGLE_USER", "")),
         "from_name":  cfg.get("from_name")  or os.environ.get("WAGGLE_NAME", ""),
         "tls":         cfg.get("tls", os.environ.get("WAGGLE_TLS", "true").lower() != "false"),
+        "smtp_starttls": cfg.get("smtp_starttls", os.environ.get("WAGGLE_SMTP_STARTTLS", "true").lower() != "false"),
         "sent_folder":  cfg.get("sent_folder") or os.environ.get("WAGGLE_SENT_FOLDER", ""),
     }
 
@@ -1689,7 +1690,10 @@ def send_email(
             s.sendmail(envelope_from, envelope_to, msg.as_string())
     else:
         with smtplib.SMTP(cfg["host"], cfg["port"]) as s:
-            s.ehlo(); s.starttls(context=ctx); s.ehlo()
+            s.ehlo()
+            if cfg.get("smtp_starttls", True) and s.has_extn("STARTTLS"):
+                s.starttls(context=ctx)
+                s.ehlo()
             if cfg["user"] and cfg["password"]:
                 s.login(cfg["user"], cfg["password"])
             s.sendmail(envelope_from, envelope_to, msg.as_string())
