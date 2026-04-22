@@ -91,7 +91,7 @@ Configuration (environment variables):
                      WAGGLE_USER / WAGGLE_PASS are reused for IMAP auth.
 """
 
-__version__ = "1.9.8"
+__version__ = "1.9.9"
 
 import os
 import re
@@ -371,7 +371,12 @@ def _imap_find_uid(m, mid):
             status, _ = m.select(folder, readonly=True)
             if status != "OK":
                 continue
-            status, data = m.uid("SEARCH", None, f'HEADER Message-ID "{mid}"')
+            # Try without angle brackets first (Stalwart indexes without <>)
+            mid_search = mid.strip("<>")
+            status, data = m.uid("SEARCH", None, f'HEADER Message-ID "{mid_search}"')
+            # Fallback: try with brackets (standard servers)
+            if status != "OK" or not data or not data[0]:
+                status, data = m.uid("SEARCH", None, f'HEADER Message-ID "{mid}"')
             if status == "OK" and data and data[0]:
                 uids = data[0].split()
                 if uids:
