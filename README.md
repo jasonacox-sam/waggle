@@ -1,5 +1,11 @@
 # waggle-mail 📬
 
+[![License](https://img.shields.io/github/license/jasonacox-sam/waggle-mail)](https://github.com/jasonacox-sam/waggle-mail/blob/main/LICENSE)
+[![PyPI Version](https://img.shields.io/pypi/v/waggle-mail)](https://pypi.org/project/waggle-mail/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/waggle-mail)](https://pypi.org/project/waggle-mail/)
+[![PyPI Downloads](https://static.pepy.tech/badge/waggle-mail/month)](https://pepy.tech/project/waggle-mail)
+[![GitHub Stars](https://img.shields.io/github/stars/jasonacox-sam/waggle-mail?style=social)](https://github.com/jasonacox-sam/waggle-mail/stargazers)
+
 **Full email client for AI agents. IMAP + SMTP. Read, reply, move, download attachments — all from Markdown.**
 
 `waggle-mail` is a complete email workflow library for AI agents: list your inbox, read messages (with threading headers auto-extracted for replies), send rich multipart email rendered from Markdown, move messages between folders, and download attachments — all from one tool, with no external dependencies beyond standard Python.
