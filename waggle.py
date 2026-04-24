@@ -91,7 +91,7 @@ Configuration (environment variables):
                      WAGGLE_USER / WAGGLE_PASS are reused for IMAP auth.
 """
 
-__version__ = "1.9.10"
+__version__ = "1.9.11"
 
 import os
 import re
@@ -181,6 +181,23 @@ def _validate_folder_name(folder):
     # Reject control characters and IMAP special chars
     if re.search(r'[\r\n\x00-\x1f]', folder):
         raise ValueError(f"Folder name contains control characters: {folder!r}")
+    return folder
+
+
+def _imap_quote_folder(folder):
+    """
+    Quote an IMAP folder name per RFC 3501 if it contains spaces or special
+    characters that would otherwise be misinterpreted by the server.
+    Already-quoted names (surrounded by double-quotes) are returned as-is.
+    """
+    if not folder:
+        return folder
+    # Already quoted
+    if folder.startswith('"') and folder.endswith('"'):
+        return folder
+    # Quote if contains space or other chars that need quoting
+    if ' ' in folder or any(c in folder for c in ('(', ')', '{', '%', '*', '\\')):
+        return f'"{folder}"'
     return folder
 
 
@@ -315,8 +332,9 @@ def _imap_append_sent(cfg, msg_bytes, folder=None):
     try:
         if folder:
             _validate_folder_name(folder)
+            quoted = _imap_quote_folder(folder)
             try:
-                status, _ = m.append(folder, r"(\Seen)", None, msg_bytes)
+                status, _ = m.append(quoted, r"(\Seen)", None, msg_bytes)
                 if status == "OK":
                     return folder
             except Exception as exc:
@@ -347,14 +365,15 @@ def _imap_append_sent(cfg, msg_bytes, folder=None):
         candidates = ([special_sent] if special_sent else []) + list(_SENT_FOLDER_CANDIDATES)
         for candidate in candidates:
             try:
-                status, _ = m.select(candidate, readonly=True)
+                quoted = _imap_quote_folder(candidate)
+                status, _ = m.select(quoted, readonly=True)
                 if status != "OK":
                     continue
                 try:
                     m.close()
                 except Exception:
                     pass
-                status, _ = m.append(candidate, r"(\Seen)", None, msg_bytes)
+                status, _ = m.append(quoted, r"(\Seen)", None, msg_bytes)
                 if status == "OK":
                     return candidate
             except Exception:
@@ -390,7 +409,7 @@ def _imap_find_uid(m, mid):
 
     for folder in preferred + all_folders:
         try:
-            status, _ = m.select(folder, readonly=True)
+            status, _ = m.select(_imap_quote_folder(folder), readonly=True)
             if status != "OK":
                 continue
             # Try without angle brackets first (Stalwart indexes without <>)
@@ -530,7 +549,7 @@ def list_inbox(folder="INBOX", limit=20, config=None):
 
     try:
         _validate_folder_name(folder)
-        status, _ = m.select(folder, readonly=True)
+        status, _ = m.select(_imap_quote_folder(folder), readonly=True)
         if status != "OK":
             raise RuntimeError(f"Could not select folder: {folder!r}")
 
@@ -641,7 +660,7 @@ def read_message(uid, folder="INBOX", mark_read=False, config=None):
 
     try:
         _validate_folder_name(folder)
-        status, _ = m.select(folder, readonly=not mark_read)
+        status, _ = m.select(_imap_quote_folder(folder), readonly=not mark_read)
         if status != "OK":
             raise RuntimeError(f"Could not select folder: {folder!r}")
 
@@ -712,7 +731,7 @@ def search_messages(query, folders=None, limit=20, config=None):
         for folder in folders:
             try:
                 _validate_folder_name(folder)
-                status, _ = m.select(folder, readonly=True)
+                status, _ = m.select(_imap_quote_folder(folder), readonly=True)
                 if status != "OK":
                     continue
 
@@ -809,7 +828,7 @@ def move_message(uid, dest_folder, src_folder="INBOX", config=None):
         _validate_folder_name(src_folder)
         _validate_folder_name(dest_folder)
         
-        status, _ = m.select(src_folder)
+        status, _ = m.select(_imap_quote_folder(src_folder))
         if status != "OK":
             raise RuntimeError(f"Could not select folder: {src_folder!r}")
 
@@ -870,7 +889,7 @@ def _modify_flags(uid, flags, action, folder, config, operation_name):
 
     try:
         _validate_folder_name(folder)
-        status, _ = m.select(folder)
+        status, _ = m.select(_imap_quote_folder(folder))
         if status != "OK":
             raise RuntimeError(f"Could not select folder: {folder!r}")
 
@@ -979,7 +998,7 @@ def download_attachments(uid, folder="INBOX", dest_dir=".", config=None):
 
     try:
         _validate_folder_name(folder)
-        status, _ = m.select(folder, readonly=True)
+        status, _ = m.select(_imap_quote_folder(folder), readonly=True)
         if status != "OK":
             raise RuntimeError(f"Could not select folder: {folder!r}")
 
@@ -1212,7 +1231,7 @@ def fetch_quoted_body(message_id, config=None):
                 return None, None
 
             # Re-select the folder (find may have left us somewhere else)
-            m.select(folder, readonly=True)
+            m.select(_imap_quote_folder(folder), readonly=True)
             typ, data = m.uid("FETCH", uid, "(BODY.PEEK[])")
             m.logout()
 
