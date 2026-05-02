@@ -1534,13 +1534,11 @@ def _md_to_html_simple(text):
         if m:
             wrapped.append(_blocks[int(m.group(1))])
         elif re.match(r"<(h[1-6]|ul|ol|blockquote|hr|div|table|pre)[\s>]", p):
-            wrapped.append(p)
         else:
             p = p.replace("\n", "<br>\n")
             wrapped.append(f'<p style="{_p_style}">{p}</p>')
 
     html_out = "\n".join(wrapped)
-    html_out = __import__('html').unescape(html_out)
     return html_out
 
 
@@ -1561,13 +1559,11 @@ def _md_to_html_rich(text):
         html_out = md_lib.markdown(text, extensions=extensions, extension_configs=ext_configs)
     except Exception as e:
         logger.warning(f"Rich markdown rendering failed: {e}, falling back to simple")
-        html_out = md_lib.markdown(text)
     html_out = re.sub(
         r'(<div class="codehilite")\s+(style="([^"]*)")',
         lambda m: f'{m.group(1)} style="{m.group(3).rstrip(";")};padding:10px 14px;border-radius:4px;"',
         html_out,
     )
-    html_out = __import__('html').unescape(html_out)
     return html_out
 
 
