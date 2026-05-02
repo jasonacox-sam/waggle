@@ -1540,6 +1540,7 @@ def _md_to_html_simple(text):
             wrapped.append(f'<p style="{_p_style}">{p}</p>')
 
     html_out = "\n".join(wrapped)
+    html_out = __import__('html').unescape(html_out)
     return html_out
 
 
@@ -1566,6 +1567,7 @@ def _md_to_html_rich(text):
         lambda m: f'{m.group(1)} style="{m.group(3).rstrip(";")};padding:10px 14px;border-radius:4px;"',
         html_out,
     )
+    html_out = __import__('html').unescape(html_out)
     return html_out
 
 
@@ -1673,8 +1675,6 @@ def send_email(
     from_header   = formataddr((name, cfg["from_addr"])) if name else cfg["from_addr"]
     envelope_from = _validate_email(cfg["from_addr"])
     envelope_to   = [_validate_email(to)]
-
-    body_md = html.unescape(body_md)
 
     plain = _md_to_plain(body_md)
     if rich:
