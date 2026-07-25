@@ -444,6 +444,21 @@ def _build_references(in_reply_to, references):
     return " ".join(dict.fromkeys(refs))
 
 
+def _html_to_plain(html: str) -> str:
+    """Convert HTML email body to readable plain text without external deps."""
+    import re as _re
+    text = _re.sub(r'(?i)<br\s*/?>', '\n', html)
+    text = _re.sub(r'(?i)<p[^>]*>', '\n', text)
+    text = _re.sub(r'(?i)</p>', '\n', text)
+    text = _re.sub(r'(?i)<li[^>]*>', '\n• ', text)
+    text = _re.sub(r'(?i)<hr[^>]*>', '\n---\n', text)
+    text = _re.sub(r'(?i)<[^>]+>', '', text)
+    text = text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<') \
+               .replace('&gt;', '>').replace('&quot;', '"').replace('&#39;', "'")
+    text = _re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
 def _validate_email(addr):
     if not addr:
         return None
@@ -789,6 +804,10 @@ def _parse_message(raw_bytes):
         p = msg.get_payload(decode=True)
         if p:
             body_plain = p.decode(msg.get_content_charset() or "utf-8", errors="replace")
+
+    # If email has no plain-text part (e.g. iPhone/Gmail HTML-only), derive one from HTML
+    if body_plain is None and body_html is not None:
+        body_plain = _html_to_plain(body_html)
 
     # Build reply references chain
     if references and message_id:
