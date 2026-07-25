@@ -70,9 +70,11 @@ class TestHtmlToPlain:
         assert '—' in result  # &mdash;
 
     def test_nbsp_decoded(self):
+        """&nbsp; must produce a regular space (U+0020), not a non-breaking space (U+00A0)."""
         result = _html_to_plain('<p>Hello&nbsp;World</p>')
         assert '&nbsp;' not in result
-        assert 'Hello' in result and 'World' in result
+        assert ' ' not in result  # no non-breaking space
+        assert 'Hello World' in result  # regular space
 
     def test_list_items(self):
         result = _html_to_plain('<ul><li>One</li><li>Two</li></ul>')

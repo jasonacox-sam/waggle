@@ -456,6 +456,8 @@ def _html_to_plain(html_text):
     text = re.sub(r'<[^>]+>', '', text)
     # Decode HTML entities via stdlib — handles full HTML5 table including smart quotes/dashes
     text = html.unescape(text)
+    # Normalize non-breaking spaces (U+00A0 from &nbsp;) to regular spaces
+    text = text.replace(' ', ' ')
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
