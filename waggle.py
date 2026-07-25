@@ -444,6 +444,24 @@ def _build_references(in_reply_to, references):
     return " ".join(dict.fromkeys(refs))
 
 
+def _html_to_plain(html_text):
+    """Convert HTML email body to readable plain text without external deps."""
+    # Remove <style>/<script> blocks entirely — contents must not appear in output
+    text = re.sub(r'(?is)<(script|style)[^>]*>.*?</\1>', '', html_text)
+    # Block-level elements → newline (covers iOS Mail <div>-per-line, tables, headings)
+    text = re.sub(r'(?i)</?(div|p|br|tr|h[1-6]|blockquote|table)[^>]*>', '\n', text)
+    text = re.sub(r'(?i)<li[^>]*>', '\n• ', text)
+    text = re.sub(r'(?i)<hr[^>]*>', '\n---\n', text)
+    # Strip remaining tags (note: attr values containing > may bleed through — acceptable for email)
+    text = re.sub(r'<[^>]+>', '', text)
+    # Decode HTML entities via stdlib — handles full HTML5 table including smart quotes/dashes
+    text = html.unescape(text)
+    # Normalize non-breaking spaces (U+00A0 from &nbsp;) to regular spaces
+    text = text.replace(' ', ' ')
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
 def _validate_email(addr):
     if not addr:
         return None
@@ -788,7 +806,15 @@ def _parse_message(raw_bytes):
     else:
         p = msg.get_payload(decode=True)
         if p:
-            body_plain = p.decode(msg.get_content_charset() or "utf-8", errors="replace")
+            decoded = p.decode(msg.get_content_charset() or "utf-8", errors="replace")
+            if msg.get_content_type() == "text/html":
+                body_html = decoded
+            else:
+                body_plain = decoded
+
+    # If email has no plain-text part (e.g. iPhone/Gmail HTML-only), derive one from HTML
+    if body_plain is None and body_html is not None:
+        body_plain = _html_to_plain(body_html)
 
     # Build reply references chain
     if references and message_id:
